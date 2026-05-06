@@ -1,28 +1,76 @@
 """OpenSearch-backed vector store. Implements VectorStoreProtocol.
 
+Supports two transports:
+  - Plain host:port over HTTP (local opensearch container).
+  - AWS OpenSearch Serverless (AOSS) via HTTPS + SigV4 auth, when
+    `aoss_endpoint` is provided. AOSS rejects `refresh=*` query params,
+    so those are dropped on the AOSS path.
+
 Lazy connection — opensearch-py doesn't actually hit the cluster until
 the first request, so constructing an OpenSearchClient is safe even
 before the cluster is up.
 """
 
 import logging
+from urllib.parse import urlparse
 
-from opensearchpy import OpenSearch
+from opensearchpy import OpenSearch, RequestsHttpConnection
 from opensearchpy.exceptions import NotFoundError, OpenSearchException
 
 log = logging.getLogger(__name__)
 
 
-class OpenSearchClient:
-    def __init__(self, host: str, port: int = 9200, use_ssl: bool = False) -> None:
-        self.client = OpenSearch(
-            hosts=[{"host": host, "port": port}],
-            http_compress=True,
-            use_ssl=use_ssl,
-            verify_certs=False,
-            ssl_show_warn=False,
-            timeout=10,
+def _aoss_auth(region: str):
+    """Build a SigV4 signer for AOSS using ambient boto3 credentials.
+
+    Reads AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN from
+    the environment via boto3's default credential chain.
+    """
+    import boto3
+    from opensearchpy import AWSV4SignerAuth
+
+    credentials = boto3.Session().get_credentials()
+    if credentials is None:
+        raise RuntimeError(
+            "AOSS requested but no AWS credentials found in environment "
+            "(AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY[/AWS_SESSION_TOKEN])"
         )
+    return AWSV4SignerAuth(credentials, region, "aoss")
+
+
+class OpenSearchClient:
+    def __init__(
+        self,
+        host: str,
+        port: int = 9200,
+        use_ssl: bool = False,
+        aoss_endpoint: str | None = None,
+        aws_region: str = "us-east-1",
+    ) -> None:
+        self.is_aoss = bool(aoss_endpoint)
+
+        if self.is_aoss:
+            parsed = urlparse(aoss_endpoint)
+            aoss_host = parsed.hostname or aoss_endpoint
+            self.client = OpenSearch(
+                hosts=[{"host": aoss_host, "port": parsed.port or 443}],
+                http_auth=_aoss_auth(aws_region),
+                use_ssl=True,
+                verify_certs=True,
+                connection_class=RequestsHttpConnection,
+                http_compress=True,
+                timeout=60,
+                pool_maxsize=20,
+            )
+        else:
+            self.client = OpenSearch(
+                hosts=[{"host": host, "port": port}],
+                http_compress=True,
+                use_ssl=use_ssl,
+                verify_certs=False,
+                ssl_show_warn=False,
+                timeout=10,
+            )
 
     def upsert(
         self,
@@ -32,12 +80,23 @@ class OpenSearchClient:
         metadata: dict,
     ) -> None:
         body = {"vector": vector, **metadata}
-        self.client.index(
-            index=collection,
-            id=doc_id,
-            body=body,
-            refresh="wait_for",
-        )
+        if self.is_aoss:
+            # AOSS VectorSearch collections don't accept custom doc IDs (not
+            # via _doc, not via _bulk). We let AOSS auto-generate the _id and
+            # rely on indexed metadata fields (e.g. `slug`, `customer_id`) for
+            # lookups. Consumers already prefer metadata fields over hit._id.
+            # Caveat: re-running seed scripts will create duplicates. Recreate
+            # the index for a clean re-seed.
+            resp = self.client.index(index=collection, body=body)
+            if resp.get("result") not in {"created", "updated"}:
+                raise OpenSearchException(f"AOSS index errored: {resp}")
+        else:
+            self.client.index(
+                index=collection,
+                id=doc_id,
+                body=body,
+                refresh="wait_for",
+            )
 
     def search(
         self,
@@ -83,10 +142,12 @@ class OpenSearchClient:
 
     def delete_by_customer(self, collection: str, customer_id: str) -> None:
         try:
-            self.client.delete_by_query(
-                index=collection,
-                body={"query": {"term": {"customer_id": customer_id}}},
-                refresh=True,
-            )
+            kwargs: dict = {
+                "index": collection,
+                "body": {"query": {"term": {"customer_id": customer_id}}},
+            }
+            if not self.is_aoss:
+                kwargs["refresh"] = True
+            self.client.delete_by_query(**kwargs)
         except (NotFoundError, OpenSearchException) as e:
             log.warning("delete_by_customer failed for %s: %s", collection, e)

@@ -9,7 +9,8 @@
       "Bash(claude mcp *)",
       "Bash(uv tool *)",
       "Bash(npx vitest *)",
-      "Bash(grep -E \"\\\\.\\(py|ts\\)$\")"
+      "Bash(grep -E \"\\\\.\\(py|ts\\)$\")",
+      "Bash(python3 -c ' *)"
     ]
   },
   "enabledMcpjsonServers": [

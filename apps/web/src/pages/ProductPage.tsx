@@ -4,14 +4,18 @@ import { useParams } from "react-router-dom";
 
 import { EditorialProductDetail } from "@/features/catalog/components/EditorialProductDetail";
 import { ProductDetailSkeleton } from "@/features/catalog/components/CatalogSkeletons";
-import { useCartStore } from "@/features/cart/store";
+import { useAddToCart } from "@/features/cart/useCart";
 import { Context } from "@/features/events/contexts";
 import { useSpecTrack } from "@/features/events/specEvents";
 import { usePdpDwell } from "@/features/events/usePdpDwell";
 import { ProductSuggestionsSection } from "@/features/recommendations/components/ProductSuggestionsSection";
 import { RecommendationRail } from "@/features/recommendations/components/RecommendationRail";
 import { pushToast } from "@/features/toast/store";
-import { useWishlistStore } from "@/features/wishlist/store";
+import {
+  useAddToWishlist,
+  useIsInWishlist,
+  useRemoveFromWishlist,
+} from "@/features/wishlist/useWishlist";
 import { apiClient } from "@/shared/api/client";
 import { tw } from "@/shared/ui/tw";
 
@@ -22,22 +26,26 @@ function truncateToastLabel(name: string, max = 44) {
 
 export function ProductPage() {
   const { slug = "" } = useParams();
-  const addItem = useCartStore((state) => state.addItem);
-  const updateQuantity = useCartStore((state) => state.updateQuantity);
-  const toggleWishlist = useWishlistStore((state) => state.toggle);
-  const hasWishlist = useWishlistStore((state) => state.has);
   const trackSpec = useSpecTrack();
+  const addToCart = useAddToCart();
+  const addToWishlist = useAddToWishlist();
+  const removeFromWishlist = useRemoveFromWishlist();
+  // `useIsInWishlist` is a hook reading from React Query cache — call it
+  // unconditionally and before any early returns. Empty productId is safe
+  // (hook returns false for falsy ids).
 
   const productQuery = useQuery({
     queryKey: ["product", slug],
     queryFn: () => apiClient.getProduct(slug),
   });
   const product = productQuery.data;
+  const wishlisted = useIsInWishlist(product?.id ?? "");
   const productCategory = product?.category ?? "";
   const productPageContext = productCategory ? Context.productPage(productCategory) : "";
   const recommendationsQuery = useQuery({
     queryKey: ["recommend", productPageContext],
-    queryFn: () => apiClient.getRecommendation(productPageContext),
+    // queryFn: () => apiClient.getRecommendation(productPageContext),
+    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
     enabled: productPageContext.length > 0,
   });
 
@@ -86,12 +94,9 @@ export function ProductPage() {
     <div className="relative isolate flex flex-col gap-0">
       <EditorialProductDetail
         product={product}
-        wishlisted={hasWishlist(product.id)}
+        wishlisted={wishlisted}
         onAddToCart={(quantity) => {
-          addItem(product);
-          if (quantity > 1) {
-            updateQuantity(product.id, quantity);
-          }
+          addToCart.mutate({ productId: product.id, quantity });
           pushToast(
             quantity > 1
               ? `Bag updated · ${truncateToastLabel(product.name)} ×${quantity}`
@@ -106,17 +111,24 @@ export function ProductPage() {
           });
         }}
         onWishlistToggle={() => {
-          const removing = hasWishlist(product.id);
-          toggleWishlist(product);
-          pushToast(
-            removing ? `Removed from wishlist · ${truncateToastLabel(product.name)}` : `Saved to wishlist · ${truncateToastLabel(product.name)}`,
-          );
-          if (removing) {
+          if (wishlisted) {
+            removeFromWishlist.mutate(product.id);
+            pushToast(`Removed from wishlist · ${truncateToastLabel(product.name)}`);
             trackSpec("wishlist_remove", {
               product_id: product.id,
               category: product.category,
             });
           } else {
+            addToWishlist.mutate({
+              productId: product.id,
+              productSnapshot: {
+                slug: product.slug,
+                name: product.name,
+                image: product.image,
+                unitPrice: product.price,
+              },
+            });
+            pushToast(`Saved to wishlist · ${truncateToastLabel(product.name)}`);
             trackSpec("wishlist_add", {
               product_id: product.id,
               product_name: product.name,

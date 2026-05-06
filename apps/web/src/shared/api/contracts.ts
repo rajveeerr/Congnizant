@@ -226,6 +226,59 @@ export type OrderListResponse = {
   total: number;
 };
 
+/**
+ * Cart + wishlist wire shapes — mirror `server/src/schemas/cart.py`.
+ * The BE returns light per-line product metadata (slug/name/image/unitPrice)
+ * rather than the full `Product` object, so render paths that previously
+ * relied on `product.brand`, `product.rating`, etc. need to either drop
+ * those fields or fetch the full product separately.
+ */
+export type CartLine = {
+  productId: string;
+  slug: string;
+  name: string;
+  image: string;
+  unitPrice: number;
+  quantity: number;
+  selectedOptions?: Record<string, string> | null;
+  addedAt: string;
+};
+
+export type CartResponse = {
+  items: CartLine[];
+  itemCount: number;
+  subtotal: number;
+  updatedAt?: string;
+};
+
+export type AddCartItemBody = {
+  productId: string;
+  quantity?: number;
+  selectedOptions?: Record<string, string>;
+};
+
+export type PatchCartItemBody = {
+  quantity?: number;
+  selectedOptions?: Record<string, string>;
+};
+
+export type WishlistLine = {
+  productId: string;
+  slug: string;
+  name: string;
+  image: string;
+  unitPrice: number;
+  addedAt: string;
+};
+
+export type WishlistResponse = {
+  items: WishlistLine[];
+};
+
+export type AddWishlistItemBody = {
+  productId: string;
+};
+
 export type RecommendationRail = {
   id: string;
   title: string;
@@ -271,6 +324,21 @@ export type InferredInterest = {
   label: string;
   confidence: number;
   source: string;
+};
+
+/**
+ * Response from `DELETE /customer` (right-to-erasure). Mirrors the dict
+ * returned by `server/src/routes/customer.py:delete_customer`. The customer
+ * auth row is NOT touched — only behavioral data is wiped, so the same email
+ * could in theory log in again. The FE treats this as "delete my data" and
+ * still logs the user out + clears local caches afterwards.
+ */
+export type DeleteCustomerResponse = {
+  customer_id: string;
+  events_deleted: number;
+  consent_deleted: number;
+  redis_keys_deleted: number;
+  vector_collections_cleared: number;
 };
 
 export type ProfileSummary = {

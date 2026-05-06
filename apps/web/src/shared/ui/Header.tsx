@@ -3,8 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 
 import { useAuth } from "@/features/auth/useAuth";
-import { useCartStore } from "@/features/cart/store";
-import { useWishlistStore } from "@/features/wishlist/store";
+import { useCartCount } from "@/features/cart/useCart";
+import { useWishlistCount } from "@/features/wishlist/useWishlist";
 import { tw } from "@/shared/ui/tw";
 
 function BagIcon({ className }: { className?: string }) {
@@ -31,8 +31,8 @@ export function Header() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { isAuthenticated, email, logout } = useAuth();
-  const cartCount = useCartStore((state) => state.items.reduce((sum, item) => sum + item.quantity, 0));
-  const wishlistCount = useWishlistStore((state) => state.items.length);
+  const cartCount = useCartCount();
+  const wishlistCount = useWishlistCount();
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

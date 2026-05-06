@@ -87,10 +87,22 @@ def make_vector_store(
     mode: str = "memory",
     host: str = "opensearch",
     port: int = 9200,
+    aoss_endpoint: str | None = None,
+    aws_region: str = "us-east-1",
 ) -> VectorStoreProtocol:
     if mode == "memory":
         return InMemoryVectorStore()
     if mode == "opensearch":
         from .opensearch import OpenSearchClient
         return OpenSearchClient(host=host, port=port)
+    if mode == "aoss":
+        if not aoss_endpoint:
+            raise ValueError("VECTOR_MODE=aoss requires AOSS_ENDPOINT to be set")
+        from .opensearch import OpenSearchClient
+        return OpenSearchClient(
+            host=host,
+            port=port,
+            aoss_endpoint=aoss_endpoint,
+            aws_region=aws_region,
+        )
     raise ValueError(f"Unknown vector store mode: {mode!r}")

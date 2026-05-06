@@ -6,8 +6,7 @@ import { Link } from "react-router-dom";
 import { z } from "zod";
 
 import { BagSkeleton } from "@/features/cart/components/BagSkeleton";
-import { useCartHydrated } from "@/features/cart/useCartHydrated";
-import { useCartStore, getCartSubtotal } from "@/features/cart/store";
+import { useCartQuery, useInvalidateCart } from "@/features/cart/useCart";
 import { Context } from "@/features/events/contexts";
 import { useSpecTrack } from "@/features/events/specEvents";
 import { RecommendationRail } from "@/features/recommendations/components/RecommendationRail";
@@ -73,16 +72,18 @@ function BagOutlineIllustration() {
 }
 
 export function CheckoutForm() {
-  const hydrated = useCartHydrated();
-  const items = useCartStore((state) => state.items);
-  const clear = useCartStore((state) => state.clear);
+  const cartQuery = useCartQuery();
+  const invalidateCart = useInvalidateCart();
   const trackSpec = useSpecTrack();
   const [done, setDone] = useState<DoneState | null>(null);
-  const subtotal = getCartSubtotal(items);
+  const items = cartQuery.data?.items ?? [];
+  const subtotal = cartQuery.data?.subtotal ?? 0;
+  const ready = cartQuery.isSuccess;
   const postPurchaseContext = Context.postPurchase();
   const postPurchaseQuery = useQuery({
     queryKey: ["recommend", postPurchaseContext],
-    queryFn: () => apiClient.getRecommendation(postPurchaseContext),
+    // queryFn: () => apiClient.getRecommendation(postPurchaseContext),
+    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
     enabled: done !== null,
   });
 
@@ -105,34 +106,38 @@ export function CheckoutForm() {
       apiClient.checkout({
         ...values,
         subtotal,
-        items: items.map((item) => ({
-          productId: item.product.id,
-          quantity: item.quantity,
+        items: items.map((line) => ({
+          productId: line.productId,
+          quantity: line.quantity,
         })),
       }),
     onSuccess: (response) => {
-      const lines = items.map((item) => ({
-        name: item.product.name,
-        quantity: item.quantity,
-        lineTotal: item.product.price * item.quantity,
+      const lines = items.map((line) => ({
+        name: line.name,
+        quantity: line.quantity,
+        lineTotal: line.unitPrice * line.quantity,
       }));
-      const st = getCartSubtotal(items);
+      const st = subtotal;
       // Spec: emit one `purchase` event per line item so the recommender can
       // attribute conversions to individual products (not just to the order).
-      // The tracker batches them — at most one network request even with a
-      // 50-line cart.
-      for (const item of items) {
+      // BE CartLine doesn't carry `category` so we pass empty — minor analytics
+      // degradation in exchange for not doing N catalog lookups at checkout.
+      for (const line of items) {
         trackSpec("purchase", {
-          product_id: item.product.id,
-          product_name: item.product.name,
-          category: item.product.category,
-          price: item.product.price,
-          quantity: item.quantity,
+          product_id: line.productId,
+          product_name: line.name,
+          category: "",
+          price: line.unitPrice,
+          quantity: line.quantity,
         });
       }
+      // BE clears the cart on successful checkout — invalidate so the next
+      // mount fetches the now-empty state. Snapshot lines + subtotal first
+      // since the confirmation view renders from the snapshot, not the
+      // (about-to-be-empty) live cart.
       startTransition(() => {
         setDone({ orderId: response.orderId, lines, subtotal: st });
-        clear();
+        invalidateCart();
       });
     },
   });
@@ -148,7 +153,7 @@ export function CheckoutForm() {
     </header>
   );
 
-  if (!hydrated) {
+  if (!ready) {
     return (
       <div className={tw.stackLg}>
         {header}
@@ -339,14 +344,14 @@ export function CheckoutForm() {
         <aside className={`${panelShell} ${tw.stackMd} lg:sticky lg:top-28`}>
           <p className={`text-[0.65rem] font-semibold uppercase tracking-[0.2em] ${tw.muted}`}>Order summary</p>
           <ul className="m-0 grid list-none gap-3 p-0" role="list">
-            {items.map((item) => (
-              <li key={item.product.id} className="flex justify-between gap-3 text-sm leading-snug text-ink/88">
+            {items.map((line) => (
+              <li key={line.productId} className="flex justify-between gap-3 text-sm leading-snug text-ink/88">
                 <span className="min-w-0 text-pretty">
-                  {item.product.name}
-                  <span className={`${tw.muted}`}> ×{item.quantity}</span>
+                  {line.name}
+                  <span className={`${tw.muted}`}> ×{line.quantity}</span>
                 </span>
                 <span className="shrink-0 tabular-nums font-medium text-ink">
-                  {formatCurrency(item.product.price * item.quantity)}
+                  {formatCurrency(line.unitPrice * line.quantity)}
                 </span>
               </li>
             ))}

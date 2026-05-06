@@ -64,7 +64,8 @@ export function CatalogPage() {
   const categoryContext = category ? Context.category(category) : "";
   const recommendationsQuery = useQuery({
     queryKey: ["recommend", categoryContext],
-    queryFn: () => apiClient.getRecommendation(categoryContext),
+    // queryFn: () => apiClient.getRecommendation(categoryContext),
+    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
     enabled: categoryContext.length > 0,
   });
 

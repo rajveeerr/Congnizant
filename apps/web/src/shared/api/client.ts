@@ -2,8 +2,11 @@ import { clearSession, getSession, sessionFromAuthResponse, setSession } from "@
 import { env } from "@/shared/config/env";
 import { ApiError } from "@/shared/api/contracts";
 import type {
+  AddCartItemBody,
+  AddWishlistItemBody,
   AuthResponse,
   AuthSession,
+  CartResponse,
   CatalogFacetGroup,
   Category,
   CheckoutInput,
@@ -11,11 +14,13 @@ import type {
   ConsentRecord,
   CreateProductReviewBody,
   CreateProductReviewResponse,
+  DeleteCustomerResponse,
   ExplanationRecord,
   IngestBatchResponse,
   IngestEventRequest,
   LoginRequest,
   OrderListResponse,
+  PatchCartItemBody,
   Product,
   ProductListResponse,
   ProductReviewsResponse,
@@ -24,6 +29,7 @@ import type {
   RegisterRequest,
   SetReviewHelpfulBody,
   SetReviewHelpfulResponse,
+  WishlistResponse,
 } from "@/shared/api/contracts";
 
 /**
@@ -197,6 +203,15 @@ export const apiClient = {
       body: JSON.stringify({ explicitPreferences }),
     }),
   getExplanations: () => request<ExplanationRecord>("/me/explanations"),
+  /**
+   * Right-to-erasure. Wipes the customer's behavioral data (events, consent,
+   * Redis state, vectors) on the BE — see `server/src/routes/customer.py`.
+   * The customer auth row is NOT removed by this endpoint; callers should
+   * still call `apiClient.logout()` after this resolves so the FE treats it
+   * as a clean session end.
+   */
+  deleteAccount: () =>
+    request<DeleteCustomerResponse>("/customer", { method: "DELETE" }),
 
   // --- Tracking ---
   /**
@@ -222,4 +237,36 @@ export const apiClient = {
       body: JSON.stringify(body),
     }),
   getOrders: (params = "") => request<OrderListResponse>(`/me/orders${params}`),
+
+  // --- Server-side cart (mirrors `server/src/routes/me_cart.py`) ---
+  /** Returns the customer's cart with pre-computed `itemCount` + `subtotal`. */
+  getCart: () => request<CartResponse>("/me/cart"),
+  /** Add a product to the cart. Server bumps quantity if the line already exists. */
+  addCartItem: (body: AddCartItemBody) =>
+    request<CartResponse>("/me/cart/items", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  /** Update quantity (and/or selectedOptions) on an existing line. */
+  patchCartItem: (productId: string, body: PatchCartItemBody) =>
+    request<CartResponse>(`/me/cart/items/${encodeURIComponent(productId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  deleteCartItem: (productId: string) =>
+    request<CartResponse>(`/me/cart/items/${encodeURIComponent(productId)}`, {
+      method: "DELETE",
+    }),
+
+  // --- Server-side wishlist (mirrors `server/src/routes/me_wishlist.py`) ---
+  getWishlist: () => request<WishlistResponse>("/me/wishlist"),
+  addWishlistItem: (body: AddWishlistItemBody) =>
+    request<WishlistResponse>("/me/wishlist/items", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  deleteWishlistItem: (productId: string) =>
+    request<WishlistResponse>(`/me/wishlist/items/${encodeURIComponent(productId)}`, {
+      method: "DELETE",
+    }),
 };

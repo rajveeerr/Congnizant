@@ -28,6 +28,8 @@ def main() -> None:
         mode=settings.vector_mode,
         host=settings.opensearch_host,
         port=settings.opensearch_port,
+        aoss_endpoint=settings.aoss_endpoint or None,
+        aws_region=settings.aws_region,
     )
     tracer = TraceLogger(settings.traces_db_dir)
     supervisor = Supervisor(dynamo=dynamo, bedrock=bedrock, vectors=vectors, tracer=tracer)

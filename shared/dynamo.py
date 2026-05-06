@@ -49,9 +49,11 @@ _coerce_floats = _decimalize
 
 class DynamoClient:
     def __init__(self, endpoint: str, region: str = "us-east-1"):
+        # Empty endpoint => use real AWS DynamoDB. boto3 rejects "" as
+        # endpoint_url, so coerce empty/None into the default-endpoint path.
         self.resource = boto3.resource(
             "dynamodb",
-            endpoint_url=endpoint,
+            endpoint_url=endpoint or None,
             region_name=region,
         )
 

@@ -15,7 +15,8 @@ export function HomePage() {
   const homepageContext = Context.homepage();
   const recommendationsQuery = useQuery({
     queryKey: ["recommend", homepageContext],
-    queryFn: () => apiClient.getRecommendation(homepageContext),
+    // queryFn: () => apiClient.getRecommendation(homepageContext),
+    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
   });
 
   const recommendationMode: "loading" | "personalized" | "generic" | "cold-start" =

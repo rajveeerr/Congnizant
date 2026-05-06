@@ -161,7 +161,8 @@ export function DemoLabPage() {
   const homepageContext = Context.homepage();
   const recommendationQuery = useQuery({
     queryKey: ["recommend", homepageContext],
-    queryFn: () => apiClient.getRecommendation(homepageContext),
+    // queryFn: () => apiClient.getRecommendation(homepageContext),
+    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
   });
   const consentQuery = useQuery({
     queryKey: ["consent"],

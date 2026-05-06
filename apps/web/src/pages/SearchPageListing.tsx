@@ -181,7 +181,8 @@ export function SearchPageListing() {
   const searchContext = isEmptyResults ? Context.noResults() : Context.search();
   const recommendationsQuery = useQuery({
     queryKey: ["recommend", searchContext],
-    queryFn: () => apiClient.getRecommendation(searchContext),
+    // queryFn: () => apiClient.getRecommendation(searchContext),
+    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
     enabled: q.length > 0 && Boolean(query.data),
   });
 

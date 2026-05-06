@@ -37,9 +37,11 @@ redis_client = make_redis(settings.redis_url)
 redis_async = aioredis.from_url(settings.redis_url, decode_responses=True)
 
 vectors = make_vector_store(
-    mode="opensearch",
+    mode=settings.vector_mode,
     host=settings.opensearch_host,
     port=settings.opensearch_port,
+    aoss_endpoint=settings.aoss_endpoint or None,
+    aws_region=settings.aws_region,
 )
 
 # Bedrock — server uses embed() to vectorize search queries against the

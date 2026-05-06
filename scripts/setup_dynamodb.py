@@ -13,7 +13,7 @@ import os
 import boto3
 from botocore.exceptions import ClientError
 
-ENDPOINT = os.getenv("DYNAMODB_ENDPOINT", "http://localhost:8001")
+ENDPOINT = os.getenv("DYNAMODB_ENDPOINT") or None  # empty => real AWS
 REGION = os.getenv("AWS_REGION", "us-east-1")
 
 dynamodb = boto3.client("dynamodb", endpoint_url=ENDPOINT, region_name=REGION)

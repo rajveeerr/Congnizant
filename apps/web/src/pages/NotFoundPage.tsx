@@ -38,7 +38,8 @@ export function NotFoundPage() {
   const noResultsContext = Context.noResults();
   const recommendationsQuery = useQuery({
     queryKey: ["recommend", noResultsContext],
-    queryFn: () => apiClient.getRecommendation(noResultsContext),
+    // queryFn: () => apiClient.getRecommendation(noResultsContext),
+    queryFn: () => Promise.resolve(null) as unknown as ReturnType<typeof apiClient.getRecommendation>,
   });
 
   return (

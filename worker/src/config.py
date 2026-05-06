@@ -12,10 +12,13 @@ class Settings(BaseSettings):
     bedrock_text_model: str = "anthropic.claude-sonnet-4-5-20250929-v1:0"
     bedrock_embed_model: str = "amazon.titan-embed-text-v2:0"
 
-    # Vector store — "memory" (process-local) or "opensearch" (real cluster)
+    # Vector store — "memory" (process-local), "opensearch" (real cluster),
+    # or "aoss" (AWS OpenSearch Serverless via SigV4). When mode="aoss",
+    # aoss_endpoint is required and host/port are ignored.
     vector_mode: str = "opensearch"
     opensearch_host: str = "opensearch"
     opensearch_port: int = 9200
+    aoss_endpoint: str = ""
 
     # Trace SQLite directory — shared volume between worker and server.
     # Each worker writes its own file (agent_traces_{hostname}.db) inside
