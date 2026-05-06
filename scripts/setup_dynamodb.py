@@ -75,6 +75,12 @@ TABLES = [
         ],
         "BillingMode": "PAY_PER_REQUEST",
     },
+    {
+        "TableName": "product_catalog",
+        "KeySchema": PK_SK,
+        "AttributeDefinitions": PK_SK_ATTRS,
+        "BillingMode": "PAY_PER_REQUEST",
+    },
 ]
 
 

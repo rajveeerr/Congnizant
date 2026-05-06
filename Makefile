@@ -1,4 +1,4 @@
-.PHONY: up down logs build server worker restart-worker setup-db setup-opensearch seed-consent scan-events scan-jobs scan-consent scan-vectors peek-queue test-bedrock test-tools test-recommend test-privacy test-e2e demo-conflict demo-tiered demo-backpressure demo-scale demo-async-recommend scale worker-count show-trace clean ps
+.PHONY: up down logs build server worker restart-worker setup-db setup-opensearch seed-consent seed-products scan-events scan-jobs scan-consent scan-vectors peek-queue test-bedrock test-tools test-recommend test-privacy test-e2e demo-conflict demo-tiered demo-backpressure demo-scale demo-async-recommend demo-complement scale worker-count show-trace clean ps
 
 up:
 	docker compose up -d --build
@@ -55,6 +55,10 @@ test-bedrock:
 seed-consent:
 	docker compose exec worker python /app/scripts/seed_consent.py
 
+# Step 7 — Seed the product_catalog table with the starter 40-item catalog.
+seed-products:
+	docker compose exec server python /app/scripts/seed_products.py
+
 test-tools:
 	docker compose exec worker python /app/scripts/test_tools.py
 
@@ -107,6 +111,11 @@ demo-scale:
 # they run in parallel on the server's event loop instead of serialising.
 demo-async-recommend:
 	docker compose exec server python /app/scripts/demo_async_recommend.py
+
+# Step 7 — Complementary-products demo (cart → bag/mouse/etc).
+# Prereq: make seed-products
+demo-complement:
+	docker compose exec server python /app/scripts/demo_complement.py
 
 ps:
 	docker compose ps

@@ -8,6 +8,7 @@ TABLE_CUSTOMER_EVENTS = "customer_events"
 TABLE_CUSTOMER_CONSENT = "customer_consent"
 TABLE_CUSTOMER_AUTH = "customer_auth"
 TABLE_JOBS = "jobs"
+TABLE_PRODUCT_CATALOG = "product_catalog"
 
 # OpenSearch collections
 COLLECTION_FACTS = "customer-facts"

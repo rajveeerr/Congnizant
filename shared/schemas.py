@@ -92,3 +92,29 @@ class AuthResponse(BaseModel):
     token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+class Product(BaseModel):
+    product_id: str
+    name: str
+    category: str           # top-level: Electronics, Outdoor, etc.
+    subcategory: str        # e.g. Laptops, Hiking Boots
+    price: float
+    description: str
+
+
+class ComplementItem(BaseModel):
+    product_id: str
+    name: str
+    category: str
+    subcategory: str
+    price: float
+    reason: str             # one-sentence justification from Claude
+    rank: int
+
+
+class ComplementResponse(BaseModel):
+    cart_items: list[str]   # the input cart product_ids
+    recommendations: list[ComplementItem]
+    job_id: str
+    cached: bool = False
