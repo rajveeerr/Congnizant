@@ -19,7 +19,7 @@ import { Link } from "react-router-dom";
 
 import { prefetchProductPageChunk } from "@/app/routeChunks";
 import { useAddToCart } from "@/features/cart/useCart";
-import { fromComplementProduct, rememberProducts, variantSnapshot } from "@/features/events/payloads";
+import { fromComplementProduct, rememberProducts } from "@/features/events/payloads";
 import { useSpecTrack } from "@/features/events/specEvents";
 import { useTrackEvent } from "@/features/events/useTrackEvent";
 import { pushToast } from "@/features/toast/store";

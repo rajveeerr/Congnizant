@@ -9,6 +9,7 @@ from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
 
 from .constants import (
     TABLE_CART_ITEMS,
@@ -64,11 +65,14 @@ class DynamoClient:
     # --- customer_events ---------------------------------------------------
 
     def put_event(self, event: dict) -> None:
-        item = _strip_empty_sets({
+        # _decimalize the whole event (including the spec payloads carrying
+        # `price`, `rating`, etc.) — DDB rejects Python floats and the FE
+        # legitimately ships them per `apps/web/event-types-description.md`.
+        item = _strip_empty_sets(_decimalize({
             "PK": f"CUSTOMER#{event['customer_id']}",
             "SK": f"EVENT#{event['event_id']}",
             **event,
-        })
+        }))
         self.table(TABLE_CUSTOMER_EVENTS).put_item(Item=item)
 
     def batch_put_events(self, events: list[dict]) -> None:
@@ -76,16 +80,20 @@ class DynamoClient:
 
         SK is keyed on event_id alone, so a retry with the same client_event_id
         overwrites the existing row instead of inserting a twin.
+
+        `_decimalize` runs on the whole item so spec event payloads with
+        `price`, `rating`, `duration_seconds`, etc. don't crash DDB on insert
+        with `TypeError: Float types are not supported`.
         """
         if not events:
             return
         with self.table(TABLE_CUSTOMER_EVENTS).batch_writer() as bw:
             for event in events:
-                item = _strip_empty_sets({
+                item = _strip_empty_sets(_decimalize({
                     "PK": f"CUSTOMER#{event['customer_id']}",
                     "SK": f"EVENT#{event['event_id']}",
                     **event,
-                })
+                }))
                 bw.put_item(Item=item)
 
     def get_event(self, customer_id: str, event_id: str) -> dict | None:
@@ -192,6 +200,10 @@ class DynamoClient:
         DynamoDB's BatchGetItem can also return UnprocessedKeys under load;
         we retry those once before giving up so partial answers don't lead
         to silent re-enqueue of already-completed jobs.
+
+        Uses the low-level client (the resource API doesn't expose a high-
+        level batch_get), so keys + responses go through TypeSerializer /
+        TypeDeserializer to keep callers dealing in plain Python dicts.
         """
         if not job_ids:
             return []
@@ -201,14 +213,21 @@ class DynamoClient:
         seen: set[str] = set()
         unique_ids = [jid for jid in job_ids if not (jid in seen or seen.add(jid))]
         client = self.resource.meta.client
+        ser = TypeSerializer()
+        deser = TypeDeserializer()
         table_name = TABLE_JOBS
         for start in range(0, len(unique_ids), 100):
             chunk = unique_ids[start : start + 100]
-            keys = [{"PK": f"JOB#{jid}", "SK": "META"} for jid in chunk]
+            keys = [
+                {"PK": ser.serialize(f"JOB#{jid}"), "SK": ser.serialize("META")}
+                for jid in chunk
+            ]
             request = {table_name: {"Keys": keys}}
             for _ in range(2):
                 resp = client.batch_get_item(RequestItems=request)
-                out.extend(resp.get("Responses", {}).get(table_name, []))
+                items = resp.get("Responses", {}).get(table_name, [])
+                for item in items:
+                    out.append({k: deser.deserialize(v) for k, v in item.items()})
                 unprocessed = resp.get("UnprocessedKeys", {}) or {}
                 if not unprocessed.get(table_name, {}).get("Keys"):
                     break
