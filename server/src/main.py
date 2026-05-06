@@ -2,6 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from shared.logging_config import configure_json_logging
@@ -55,9 +56,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="HyperPersona Server", version="0.14.0", lifespan=lifespan)
 
-# Middleware order: last added runs FIRST. JWT auth must run before rate
-# limit so unauth'd requests get 401 (and the rate limit can read the
-# resolved customer_id from request.state).
+# Middleware order: last added runs FIRST. So the chain on each request is
+#   CORS → JWT auth → RateLimit → route handler
+# CORS goes outermost so the browser preflight (OPTIONS without an Authorization
+# header) gets answered with a 200 + CORS headers BEFORE the JWT middleware
+# can 401 it. allow_origins is permissive because the FE may run on any of
+# localhost:5173 (Vite), the storefront's deployed origin, or other
+# preview deploys — the JWT itself is the auth gate.
 app.add_middleware(
     RateLimitMiddleware,
     redis_client=redis_client,
@@ -65,6 +70,15 @@ app.add_middleware(
     window_s=60,
 )
 app.add_middleware(JWTAuthMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,  # required by the spec when allow_origins=["*"]
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,
+)
 
 
 @app.exception_handler(Exception)
