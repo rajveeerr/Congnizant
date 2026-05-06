@@ -2,6 +2,7 @@ import logging
 
 from shared.bedrock import make_bedrock_client
 from shared.dynamo import DynamoClient
+from shared.logging_config import configure_json_logging
 from shared.queue import make_redis, pop_job
 from shared.vector_store import make_vector_store
 
@@ -10,10 +11,7 @@ from .config import settings
 from .job_handler import dispatch
 from .trace_logger import TraceLogger
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
-)
+configure_json_logging()
 log = logging.getLogger("worker")
 
 

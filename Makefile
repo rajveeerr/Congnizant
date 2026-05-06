@@ -1,4 +1,4 @@
-.PHONY: up down logs build server worker restart-worker setup-db setup-opensearch seed-consent scan-events scan-jobs scan-consent scan-vectors peek-queue test-bedrock test-tools test-recommend test-privacy show-trace clean ps
+.PHONY: up down logs build server worker restart-worker setup-db setup-opensearch seed-consent scan-events scan-jobs scan-consent scan-vectors peek-queue test-bedrock test-tools test-recommend test-privacy test-e2e demo-conflict show-trace clean ps
 
 up:
 	docker compose up -d --build
@@ -72,6 +72,13 @@ test-recommend:
 # Phase 11 — End-to-end privacy + GDPR delete verification
 test-privacy:
 	docker compose exec server python /app/scripts/test_privacy.py
+
+# Phase 12 — Full happy-path demo + ACE conflict-detection demo
+test-e2e:
+	docker compose exec server python /app/scripts/test_e2e.py
+
+demo-conflict:
+	docker compose exec server python /app/scripts/conflict_demo.py
 
 ps:
 	docker compose ps
