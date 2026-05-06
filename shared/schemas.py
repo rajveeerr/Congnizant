@@ -46,6 +46,26 @@ class Job(BaseModel):
 
 class IngestEventRequest(BaseModel):
     customer_id: str
+    # Frontend-supplied UUID. Same retry → same id → no duplicates downstream.
+    client_event_id: str
     event_type: str
     payload: dict
     consent_scope: set[str] = Field(default_factory=set)
+
+
+class IngestBatchRequest(BaseModel):
+    events: list[IngestEventRequest] = Field(min_length=1, max_length=100)
+
+
+class IngestEventResult(BaseModel):
+    client_event_id: str
+    status: str  # "queued" | "rejected"
+    event_id: str | None = None
+    job_id: str | None = None
+    reason: str | None = None
+
+
+class IngestBatchResponse(BaseModel):
+    accepted: int
+    rejected: int
+    results: list[IngestEventResult]

@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Read(//c/cognizant-hack/**)"
+      "Read(//c/cognizant-hack/**)",
+      "PowerShell($ErrorActionPreference = 'Continue'; Write-Output '=== aws-core ==='; $core = Start-Process -FilePath 'uvx' -ArgumentList 'awslabs.core-mcp-server' -PassThru -RedirectStandardError 'C:\\\\tmp\\\\core_err.txt' -RedirectStandardOutput 'C:\\\\tmp\\\\core_out.txt' -NoNewWindow; Start-Sleep -Seconds 8; if \\(-not $core.HasExited\\) { Stop-Process -Id $core.Id -Force }; Get-Content C:\\\\tmp\\\\core_err.txt -ErrorAction SilentlyContinue; Write-Output ''; Write-Output '=== aws-diagram ==='; $diag = Start-Process -FilePath 'uvx' -ArgumentList 'awslabs.aws-diagram-mcp-server' -PassThru -RedirectStandardError 'C:\\\\tmp\\\\diag_err.txt' -RedirectStandardOutput 'C:\\\\tmp\\\\diag_out.txt' -NoNewWindow; Start-Sleep -Seconds 8; if \\(-not $diag.HasExited\\) { Stop-Process -Id $diag.Id -Force }; Get-Content C:\\\\tmp\\\\diag_err.txt -ErrorAction SilentlyContinue)",
+      "Bash(docker compose *)",
+      "Bash(python -c \"import pydantic\")",
+      "Bash(python -m py_compile /c/cognizant-hack/shared/schemas.py /c/cognizant-hack/shared/dynamo.py /c/cognizant-hack/shared/queue.py /c/cognizant-hack/server/src/routes/events.py /c/cognizant-hack/server/src/main.py /c/cognizant-hack/worker/src/agents/tools/analyzer_tool.py /c/cognizant-hack/scripts/test_e2e.py /c/cognizant-hack/scripts/test_privacy.py)",
+      "Bash(python -m py_compile /c/cognizant-hack/shared/dynamo.py /c/cognizant-hack/worker/src/handlers/process_event.py /c/cognizant-hack/server/src/routes/events.py)",
+      "Bash(python -m py_compile /c/cognizant-hack/scripts/test_privacy.py)",
+      "Bash(docker exec *)",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T server python /app/scripts/test_e2e.py)",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T server python /app/scripts/test_privacy.py)"
     ],
     "additionalDirectories": [
       "C:\\cognizant-hack"

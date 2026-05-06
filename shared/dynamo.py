@@ -35,16 +35,33 @@ class DynamoClient:
     def put_event(self, event: dict) -> None:
         item = _strip_empty_sets({
             "PK": f"CUSTOMER#{event['customer_id']}",
-            "SK": f"EVENT#{event['created_at']}#{event['event_id']}",
+            "SK": f"EVENT#{event['event_id']}",
             **event,
         })
         self.table(TABLE_CUSTOMER_EVENTS).put_item(Item=item)
 
-    def get_event(self, customer_id: str, created_at: str, event_id: str) -> dict | None:
+    def batch_put_events(self, events: list[dict]) -> None:
+        """Bulk insert. boto3's batch_writer chunks at 25 and retries unprocessed items.
+
+        SK is keyed on event_id alone, so a retry with the same client_event_id
+        overwrites the existing row instead of inserting a twin.
+        """
+        if not events:
+            return
+        with self.table(TABLE_CUSTOMER_EVENTS).batch_writer() as bw:
+            for event in events:
+                item = _strip_empty_sets({
+                    "PK": f"CUSTOMER#{event['customer_id']}",
+                    "SK": f"EVENT#{event['event_id']}",
+                    **event,
+                })
+                bw.put_item(Item=item)
+
+    def get_event(self, customer_id: str, event_id: str) -> dict | None:
         resp = self.table(TABLE_CUSTOMER_EVENTS).get_item(
             Key={
                 "PK": f"CUSTOMER#{customer_id}",
-                "SK": f"EVENT#{created_at}#{event_id}",
+                "SK": f"EVENT#{event_id}",
             }
         )
         return resp.get("Item")
@@ -55,11 +72,11 @@ class DynamoClient:
         )
         return resp.get("Items", [])
 
-    def delete_event(self, customer_id: str, created_at: str, event_id: str) -> None:
+    def delete_event(self, customer_id: str, event_id: str) -> None:
         self.table(TABLE_CUSTOMER_EVENTS).delete_item(
             Key={
                 "PK": f"CUSTOMER#{customer_id}",
-                "SK": f"EVENT#{created_at}#{event_id}",
+                "SK": f"EVENT#{event_id}",
             }
         )
 
@@ -75,14 +92,13 @@ class DynamoClient:
     def update_event_status(
         self,
         customer_id: str,
-        created_at: str,
         event_id: str,
         status: str,
     ) -> None:
         self.table(TABLE_CUSTOMER_EVENTS).update_item(
             Key={
                 "PK": f"CUSTOMER#{customer_id}",
-                "SK": f"EVENT#{created_at}#{event_id}",
+                "SK": f"EVENT#{event_id}",
             },
             UpdateExpression="SET #s = :s",
             ExpressionAttributeNames={"#s": "status"},
@@ -124,6 +140,18 @@ class DynamoClient:
             **job,
         })
         self.table(TABLE_JOBS).put_item(Item=item)
+
+    def batch_put_jobs(self, jobs: list[dict]) -> None:
+        if not jobs:
+            return
+        with self.table(TABLE_JOBS).batch_writer() as bw:
+            for job in jobs:
+                item = _strip_empty_sets({
+                    "PK": f"JOB#{job['job_id']}",
+                    "SK": "META",
+                    **job,
+                })
+                bw.put_item(Item=item)
 
     def get_job(self, job_id: str) -> dict | None:
         resp = self.table(TABLE_JOBS).get_item(

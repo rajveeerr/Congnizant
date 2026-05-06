@@ -13,19 +13,18 @@ def handle(job: dict, ctx: dict) -> None:
     payload = job["payload"]
     customer_id = payload["customer_id"]
     event_id = payload["event_id"]
-    created_at = payload["created_at"]
 
     dynamo = ctx["dynamo"]
     supervisor = ctx["supervisor"]
 
-    event = dynamo.get_event(customer_id, created_at, event_id)
+    event = dynamo.get_event(customer_id, event_id)
     if not event:
         raise ValueError(f"event {event_id} not found in DynamoDB")
 
     log.info("Processing event %s for customer %s", event_id, customer_id)
-    dynamo.update_event_status(customer_id, created_at, event_id, "processing")
+    dynamo.update_event_status(customer_id, event_id, "processing")
 
     result = supervisor.run_process_event(job["job_id"], event)
 
-    dynamo.update_event_status(customer_id, created_at, event_id, "processed")
+    dynamo.update_event_status(customer_id, event_id, "processed")
     log.info("Event %s done (status=%s)", event_id, result.get("status"))

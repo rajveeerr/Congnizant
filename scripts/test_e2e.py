@@ -18,6 +18,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+import uuid
 from urllib.parse import urlencode
 
 BASE_URL = os.getenv("HYPERPERSONA_BASE_URL", "http://server:8000")
@@ -63,7 +64,7 @@ def main() -> None:
     })
     print(f"POST /consent → {s} {b}")
 
-    _section("2. INGEST EVENTS")
+    _section("2. INGEST EVENTS (batch)")
     events = [
         ("search",      {"query": "waterproof hiking boots"}),
         ("page_view",   {"page": "/boots/salomon-x-ultra"}),
@@ -72,16 +73,31 @@ def main() -> None:
         ("purchase",    {"product": "Salomon X Ultra", "price": 159}),
         ("search",      {"query": "trail running socks"}),
     ]
-    job_ids: list[str] = []
-    for evt_type, payload in events:
-        s, b = _request("POST", "/events", {
-            "customer_id": CUSTOMER,
-            "event_type": evt_type,
-            "payload": payload,
-        })
-        print(f"  POST {evt_type:12} → {s}  job={b.get('job_id', '')[:8]}")
-        if s == 202:
-            job_ids.append(b["job_id"])
+    batch_payload = {
+        "events": [
+            {
+                "customer_id": CUSTOMER,
+                "client_event_id": str(uuid.uuid4()),
+                "event_type": evt_type,
+                "payload": payload,
+            }
+            for evt_type, payload in events
+        ]
+    }
+    s, b = _request("POST", "/events/batch", batch_payload)
+    print(f"POST /events/batch ({len(events)} events) → {s}  "
+          f"accepted={b.get('accepted')}  rejected={b.get('rejected')}")
+    job_ids: list[str] = [
+        r["job_id"] for r in (b.get("results") or []) if r.get("status") == "queued"
+    ]
+    for evt, res in zip(events, b.get("results") or []):
+        print(f"  {evt[0]:12} → {res['status']:8} job={(res.get('job_id') or '')[:12]}")
+
+    _section("2b. RETRY THE SAME BATCH (idempotency check)")
+    s2, b2 = _request("POST", "/events/batch", batch_payload)
+    print(f"POST /events/batch (same payload) → {s2}  "
+          f"accepted={b2.get('accepted')}  rejected={b2.get('rejected')}")
+    print("  (event_id reused → DDB rows overwrite, vectors overwrite, no duplicates)")
 
     print()
     print("waiting 6s for worker...")

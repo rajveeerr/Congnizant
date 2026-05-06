@@ -5,11 +5,11 @@ Mock Bedrock returns a non-JSON stub; we fall back to a single canned fact
 so the wiring still works end-to-end.
 """
 
+import hashlib
 import json
 import logging
 import re
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from shared.bedrock import BedrockClientProtocol
 from shared.constants import COLLECTION_BEHAVIOR, COLLECTION_FACTS
@@ -66,16 +66,21 @@ def analyze_behavior(
     )
     facts = _parse_facts(raw)
 
-    # 3. Embed each fact and upsert into customer_facts
+    # 3. Embed each fact and upsert into customer_facts.
+    # Doc id = event_id + sha256(fact_text). Re-running this analyzer for the
+    # same event with the same fact overwrites the same row instead of
+    # producing a duplicate.
     stored = 0
     for fact in facts:
         fact_text = (fact or {}).get("text", "").strip()
         if not fact_text:
             continue
+        digest = hashlib.sha256(fact_text.encode("utf-8")).hexdigest()[:16]
+        doc_id = f"{event_id}:{digest}"
         fact_vector = bedrock.embed(fact_text)
         vectors.upsert(
             COLLECTION_FACTS,
-            str(uuid4()),
+            doc_id,
             fact_vector,
             {
                 "customer_id": customer_id,
