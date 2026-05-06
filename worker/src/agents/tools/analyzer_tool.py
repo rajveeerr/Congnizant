@@ -18,13 +18,29 @@ from shared.vector_store import VectorStoreProtocol
 log = logging.getLogger(__name__)
 
 
-_SYSTEM = "Return only a JSON array. Each fact is one short declarative sentence."
-
-_PROMPT_TEMPLATE = (
-    "Extract atomic facts from this customer event text. Return a JSON array "
-    "of objects with keys 'text' (short declarative sentence) and 'polarity' "
-    "(-1, 0, or 1).\n\nEvent: {text}"
+_SYSTEM = (
+    "Extract atomic facts ABOUT THE CUSTOMER from this event. Return a JSON "
+    "array of {\"text\", \"polarity\"} objects. Maximum 5 facts.\n\n"
+    "polarity describes the customer's sentiment toward the subject of the fact:\n"
+    "   1  → customer prefers / likes / wants\n"
+    "   0  → neutral / informational\n"
+    "  -1  → customer dislikes / avoids / returned\n\n"
+    "Each fact must be a short declarative sentence (8 words or fewer) about "
+    "the customer, not about the event itself. Return ONLY the JSON array — "
+    "no prose, no markdown, no explanation.\n\n"
+    "Examples:\n"
+    '  Event "purchase: Salomon X Ultra trail running shoes"\n'
+    '    → [{"text": "owns Salomon X Ultra", "polarity": 0},\n'
+    '       {"text": "interested in trail running", "polarity": 1}]\n'
+    '  Event "return: Nike Pegasus, reason: poor fit"\n'
+    '    → [{"text": "rejected Nike Pegasus", "polarity": -1},\n'
+    '       {"text": "fit matters to this customer", "polarity": 1}]\n'
+    '  Event "search: waterproof hiking boots size 11"\n'
+    '    → [{"text": "shopping for waterproof hiking boots", "polarity": 1},\n'
+    '       {"text": "wears size 11", "polarity": 0}]'
 )
+
+_PROMPT_TEMPLATE = "Event: {text}"
 
 
 def _parse_facts(generated: str) -> list[dict]:
@@ -39,6 +55,36 @@ def _parse_facts(generated: str) -> list[dict]:
         pass
     # mock-mode fallback so the rest of the pipeline has at least one fact
     return [{"text": "interested in this product category", "polarity": 1}]
+
+
+def make_analyzer_tool(
+    bedrock: BedrockClientProtocol,
+    vectors: VectorStoreProtocol,
+):
+    """Return a Strands @tool that closes over bedrock + vectors deps."""
+    from strands import tool
+
+    @tool
+    def analyze_behavior_tool(
+        customer_id: str, event_text: str, event_id: str,
+    ) -> dict:
+        """Extract behavioral facts from a customer event, embed them, store.
+
+        Embeds the event text and stores it in behavior-embeddings. Asks
+        Claude to extract atomic facts as JSON, embeds each fact, stores
+        them in customer-facts. Returns a count of facts extracted.
+
+        Args:
+            customer_id: the customer the event belongs to
+            event_text: redacted event text (PII already removed by privacy tool)
+            event_id: the event's unique ID, used as the doc-id base
+
+        Returns:
+            dict with 'facts_extracted' (int) and 'event_embedded' (bool).
+        """
+        return analyze_behavior(customer_id, event_text, event_id, bedrock, vectors)
+
+    return analyze_behavior_tool
 
 
 def analyze_behavior(

@@ -87,8 +87,8 @@ def make_vector_store(
     mode: str = "memory",
     host: str = "opensearch",
     port: int = 9200,
-    aoss_endpoint: str | None = None,
-    aws_region: str = "us-east-1",
+    aoss_endpoint: str = "",
+    region: str = "us-east-1",
 ) -> VectorStoreProtocol:
     if mode == "memory":
         return InMemoryVectorStore()
@@ -98,11 +98,11 @@ def make_vector_store(
     if mode == "aoss":
         if not aoss_endpoint:
             raise ValueError("VECTOR_MODE=aoss requires AOSS_ENDPOINT to be set")
+        # AOSS endpoint format: https://abc123.us-east-1.aoss.amazonaws.com
+        # opensearch-py wants just the host, no scheme.
+        host_only = aoss_endpoint.replace("https://", "").replace("http://", "").rstrip("/")
         from .opensearch import OpenSearchClient
         return OpenSearchClient(
-            host=host,
-            port=port,
-            aoss_endpoint=aoss_endpoint,
-            aws_region=aws_region,
+            host=host_only, port=443, use_ssl=True, aoss=True, region=region,
         )
     raise ValueError(f"Unknown vector store mode: {mode!r}")

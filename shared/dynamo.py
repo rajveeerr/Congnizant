@@ -49,8 +49,9 @@ _coerce_floats = _decimalize
 
 class DynamoClient:
     def __init__(self, endpoint: str, region: str = "us-east-1"):
-        # Empty endpoint => use real AWS DynamoDB. boto3 rejects "" as
-        # endpoint_url, so coerce empty/None into the default-endpoint path.
+        # Empty endpoint => use AWS's default endpoint (real DynamoDB).
+        # Non-empty => DynamoDB Local at that URL.
+        # boto3 rejects "" as endpoint_url, so coerce empty/None to None.
         self.resource = boto3.resource(
             "dynamodb",
             endpoint_url=endpoint or None,
@@ -255,6 +256,22 @@ class DynamoClient:
             Key={"PK": f"PRODUCT#{slug}", "SK": "META"}
         )
         return resp.get("Item")
+
+    def batch_get_products(self, slugs: list[str]) -> list[dict]:
+        """Fetch storefront products for many slugs in one round-trip.
+        DDB BatchGetItem caps at 100 keys per request — fine for the
+        complement candidate-pool size (~30-80)."""
+        if not slugs:
+            return []
+        keys = [{"PK": f"PRODUCT#{slug}", "SK": "META"} for slug in slugs]
+        resp = self.resource.batch_get_item(
+            RequestItems={TABLE_PRODUCTS: {"Keys": keys}}
+        )
+        items = resp.get("Responses", {}).get(TABLE_PRODUCTS, [])
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+        return items
 
     def scan_products(self) -> list[dict]:
         """Return every product. Catalog is small (~hundreds of SKUs) so

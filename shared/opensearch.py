@@ -1,10 +1,10 @@
 """OpenSearch-backed vector store. Implements VectorStoreProtocol.
 
-Supports two transports:
-  - Plain host:port over HTTP (local opensearch container).
-  - AWS OpenSearch Serverless (AOSS) via HTTPS + SigV4 auth, when
-    `aoss_endpoint` is provided. AOSS rejects `refresh=*` query params,
-    so those are dropped on the AOSS path.
+One class, two backends:
+  - Local OpenSearch: HTTP, no auth (dev container at port 9200).
+  - AWS OpenSearch Serverless (AOSS): HTTPS + SigV4 auth, port 443. AOSS
+    rejects `refresh=*` query params and client-supplied document IDs in
+    VECTORSEARCH collections, so the AOSS branch drops both.
 
 Lazy connection — opensearch-py doesn't actually hit the cluster until
 the first request, so constructing an OpenSearchClient is safe even
@@ -12,30 +12,11 @@ before the cluster is up.
 """
 
 import logging
-from urllib.parse import urlparse
 
 from opensearchpy import OpenSearch, RequestsHttpConnection
 from opensearchpy.exceptions import NotFoundError, OpenSearchException
 
 log = logging.getLogger(__name__)
-
-
-def _aoss_auth(region: str):
-    """Build a SigV4 signer for AOSS using ambient boto3 credentials.
-
-    Reads AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN from
-    the environment via boto3's default credential chain.
-    """
-    import boto3
-    from opensearchpy import AWSV4SignerAuth
-
-    credentials = boto3.Session().get_credentials()
-    if credentials is None:
-        raise RuntimeError(
-            "AOSS requested but no AWS credentials found in environment "
-            "(AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY[/AWS_SESSION_TOKEN])"
-        )
-    return AWSV4SignerAuth(credentials, region, "aoss")
 
 
 class OpenSearchClient:
@@ -44,23 +25,34 @@ class OpenSearchClient:
         host: str,
         port: int = 9200,
         use_ssl: bool = False,
-        aoss_endpoint: str | None = None,
-        aws_region: str = "us-east-1",
+        aoss: bool = False,
+        region: str = "us-east-1",
     ) -> None:
-        self.is_aoss = bool(aoss_endpoint)
+        self.is_aoss = aoss
+        if aoss:
+            # OpenSearch Serverless: SigV4 with the running role's creds.
+            # boto3.Session() picks up AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY
+            # + AWS_SESSION_TOKEN from env automatically. Timeout is 60s for
+            # cold-start tolerance — first request to a freshly-warmed AOSS
+            # collection can take ~30-40s.
+            import boto3
+            from opensearchpy import AWSV4SignerAuth
 
-        if self.is_aoss:
-            parsed = urlparse(aoss_endpoint)
-            aoss_host = parsed.hostname or aoss_endpoint
+            credentials = boto3.Session().get_credentials()
+            if credentials is None:
+                raise RuntimeError(
+                    "AOSS requested but no AWS credentials found in environment "
+                    "(AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY[/AWS_SESSION_TOKEN])"
+                )
             self.client = OpenSearch(
-                hosts=[{"host": aoss_host, "port": parsed.port or 443}],
-                http_auth=_aoss_auth(aws_region),
+                hosts=[{"host": host, "port": port}],
+                http_auth=AWSV4SignerAuth(credentials, region, "aoss"),
                 use_ssl=True,
                 verify_certs=True,
                 connection_class=RequestsHttpConnection,
                 http_compress=True,
-                timeout=60,
                 pool_maxsize=20,
+                timeout=60,
             )
         else:
             self.client = OpenSearch(
@@ -81,12 +73,12 @@ class OpenSearchClient:
     ) -> None:
         body = {"vector": vector, **metadata}
         if self.is_aoss:
-            # AOSS VectorSearch collections don't accept custom doc IDs (not
-            # via _doc, not via _bulk). We let AOSS auto-generate the _id and
-            # rely on indexed metadata fields (e.g. `slug`, `customer_id`) for
-            # lookups. Consumers already prefer metadata fields over hit._id.
-            # Caveat: re-running seed scripts will create duplicates. Recreate
-            # the index for a clean re-seed.
+            # AOSS VECTORSEARCH rejects client-supplied IDs (not via _doc, not
+            # via _bulk) — the only accepted shape is POST /{index}/_doc with
+            # no ID. AOSS auto-generates the _id and consumers already prefer
+            # metadata fields (slug, customer_id) over the doc id, so the
+            # generated id is functionally fine. Trade-off: retries create
+            # duplicate docs; reconcile_products dedupes by slug.
             resp = self.client.index(index=collection, body=body)
             if resp.get("result") not in {"created", "updated"}:
                 raise OpenSearchException(f"AOSS index errored: {resp}")

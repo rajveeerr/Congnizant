@@ -1,8 +1,14 @@
 """Handle generate_recommendation jobs.
 
-Calls recommender_tool then verifier_tool, writes the final result onto
-result:{job_id} in Redis so the waiting server can pick it up. Also
-emits trace rows so the same trace inspection works as for process_event.
+Pipeline:
+  1. Run the recommend supervisor (manual or strands) → offer text +
+     verifier status + ACE-ranked facts.
+  2. Pass those ranked facts through the products picker → personalized
+     in-stock product cards via blended-KNN over OpenSearch product-catalog.
+  3. Build a single 'Because you ...' personalization heading from the
+     top Prefers fact (or null for cold start).
+  4. Strip the internal `ranked_facts` field, merge picker output, push
+     to result:{job_id} for the waiting server.
 """
 
 import json
@@ -11,9 +17,40 @@ import time
 
 from shared.queue import push_result
 
-from ..agents.tools import recommender_tool, verifier_tool
+from ..agents.tools import products_picker_tool
 
 log = logging.getLogger(__name__)
+
+
+def _build_personalization_reason(ranked_facts: list[dict]) -> str | None:
+    """Format the highest-score Prefers fact as a 2nd-person heading.
+
+    Returns None for cold-start (no Prefers facts). The frontend renders a
+    fallback heading like 'Recommended for you' in that case.
+
+    Heuristic, not LLM. With real Bedrock we could add a tiny Haiku call to
+    rewrite the heading into clean grammar; the heuristic is good enough
+    for v1 and ships zero new Bedrock cost.
+    """
+    prefers = [
+        f for f in ranked_facts
+        if (f.get("polarity") or 0) >= 0 and f.get("text")
+    ]
+    if not prefers:
+        return None
+    # ace_ranking.rank_facts already sorts by combined_score desc, but be
+    # explicit so the heading is stable if that ordering convention shifts.
+    prefers.sort(key=lambda f: float(f.get("combined_score", 0)), reverse=True)
+    top_text = prefers[0]["text"].strip()
+    if not top_text:
+        return None
+    # Lowercase the leading character so "Likes hiking gear" reads as
+    # "Because you likes hiking gear" — still grammatically rough but a
+    # closer fit than "Because you Likes ...".
+    if top_text[0].isupper() and (len(top_text) == 1 or not top_text[1].isupper()):
+        top_text = top_text[0].lower() + top_text[1:]
+    heading = f"Because you {top_text}"
+    return heading[:90]
 
 
 def handle(job: dict, ctx: dict) -> None:
@@ -22,60 +59,44 @@ def handle(job: dict, ctx: dict) -> None:
     customer_id = payload["customer_id"]
     context = payload["context"]
 
+    supervisor = ctx["recommend_supervisor"]
+    redis_client = ctx["redis"]
     bedrock = ctx["bedrock"]
     vectors = ctx["vectors"]
-    redis_client = ctx["redis"]
+    dynamo = ctx["dynamo"]
     tracer = ctx["tracer"]
 
-    tracer.log(
-        job_id, "supervisor", "start_recommend",
-        {"customer_id": customer_id, "context_len": len(context)},
-        {}, 0.0, "ok",
-    )
+    result = supervisor.run_recommend(job_id, customer_id, context)
 
-    # 1. Recommender draft
+    # Internal — used to seed the picker + heading; not returned publicly.
+    ranked_facts = result.pop("ranked_facts", [])
+
     t0 = time.time()
-    rec = recommender_tool.generate_recommendation(
-        customer_id, context, bedrock, vectors,
+    picker_out = products_picker_tool.pick_personalized_products(
+        context=context,
+        ranked_facts=ranked_facts,
+        bedrock=bedrock,
+        vectors=vectors,
+        dynamo=dynamo,
     )
+    duration_ms = (time.time() - t0) * 1000
     tracer.log(
-        job_id, "recommender", "generate_recommendation",
-        {"customer_id": customer_id, "context_len": len(context)},
-        rec, (time.time() - t0) * 1000, "ok",
+        job_id, "products_picker", "pick_products",
+        {"context_len": len(context), "facts_in": len(ranked_facts)},
+        {
+            "products_returned": len(picker_out["products"]),
+            "candidates_considered": picker_out["candidates_considered"],
+        },
+        duration_ms, "ok",
     )
 
-    # 2. Verifier
-    t0 = time.time()
-    source_summary = (
-        f"context={context}; "
-        f"facts_used={rec['facts_used']}; "
-        f"behaviors_used={rec['behaviors_used']}; "
-        f"summaries_used={rec.get('summaries_used', 0)}"
-    )
-    verified = verifier_tool.verify_recommendation(
-        rec["offer"], source_summary, bedrock,
-    )
-    tracer.log(
-        job_id, "verifier", "verify_recommendation",
-        {"draft_len": len(rec.get("offer", ""))},
-        verified, (time.time() - t0) * 1000, "ok",
-    )
-
-    result = {
-        "offer": verified["final_offer"],
-        "verifier_status": verified["status"],
-        "facts_retrieved": rec.get("facts_retrieved", 0),
-        "facts_used": rec["facts_used"],
-        "behaviors_used": rec["behaviors_used"],
-        "summaries_used": rec.get("summaries_used", 0),
-        "conflicts": rec.get("conflicts", []),
-        "job_id": job_id,
-    }
+    result["products"] = picker_out["products"]
+    result["candidates_considered"] = picker_out["candidates_considered"]
+    result["personalization_reason"] = _build_personalization_reason(ranked_facts)
+    result["job_id"] = job_id
 
     push_result(redis_client, job_id, json.dumps(result))
-    tracer.log(
-        job_id, "supervisor", "end_recommend",
-        {}, {"verifier_status": verified["status"]},
-        0.0, "ok",
+    log.info(
+        "recommendation result pushed for job %s (products=%d, facts=%d)",
+        job_id, len(picker_out["products"]), len(ranked_facts),
     )
-    log.info("recommendation result pushed for job %s", job_id)
