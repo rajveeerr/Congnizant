@@ -191,10 +191,6 @@ def _parse_json(generated: str) -> list[dict]:
         return []
 
 
-def _looks_like_mock(text: str) -> bool:
-    return text.strip().startswith("[mock]")
-
-
 def _match_fact_to_product(
     product: dict,
     prefers_facts: list[dict],
@@ -236,9 +232,9 @@ def _heuristic_fallback(
     ranked_facts: list[dict],
     limit: int,
 ) -> list[dict]:
-    """Mock-mode / parse-failure fallback: take top N from the KNN-ranked
-    candidate list. Candidates are already similarity-sorted, so this is a
-    sensible default. Personalization reasons are derived heuristically from
+    """Parse-failure fallback: take top N from the KNN-ranked candidate
+    list. Candidates are already similarity-sorted, so this is a sensible
+    default. Personalization reasons are derived heuristically from
     fact-text ↔ product-attribute overlap."""
     prefers_facts = [
         f for f in ranked_facts if (f.get("polarity") or 0) >= 0 and f.get("text")
@@ -621,12 +617,10 @@ def generate_related_recommendation(
     )
     raw = bedrock.generate(prompt=prompt, system=system, max_tokens=600)
 
-    # 5. Parse + fallback.
-    parsed: list[dict] = []
-    used_llm = False
-    if not _looks_like_mock(raw):
-        parsed = _parse_json(raw)
-        used_llm = bool(parsed)
+    # 5. Parse + fallback. If Claude returned malformed JSON or an empty rec
+    # set, fall back to the deterministic heuristic so the rail still renders.
+    parsed = _parse_json(raw)
+    used_llm = bool(parsed)
     if not parsed:
         parsed = _heuristic_fallback(candidates, ranked_facts, limit)
 
