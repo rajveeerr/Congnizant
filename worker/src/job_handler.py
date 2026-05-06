@@ -4,12 +4,14 @@ Reads job_type and routes to the matching handler. Wraps the call in
 status updates so jobs flip running → completed/failed in DynamoDB no
 matter what the handler does. Exceptions are caught and logged — they
 mark the job failed but don't kill the worker.
+
+ctx is a dict of shared singletons (dynamo, bedrock, vectors, tracer,
+supervisor) constructed once in main.py and passed to every handler.
 """
 
 import json
 import logging
 
-from shared.dynamo import DynamoClient
 from shared.schemas import utc_now_iso
 
 from .handlers import generate_recommendation, process_event
@@ -22,7 +24,9 @@ HANDLERS = {
 }
 
 
-def dispatch(payload: str, dynamo: DynamoClient) -> None:
+def dispatch(payload: str, ctx: dict) -> None:
+    dynamo = ctx["dynamo"]
+
     job = json.loads(payload)
     job_id = job["job_id"]
     job_type = job["job_type"]
@@ -42,8 +46,8 @@ def dispatch(payload: str, dynamo: DynamoClient) -> None:
     dynamo.update_job_status(job_id, "running")
 
     try:
-        handler(job, dynamo)
-    except Exception as e:  # noqa: BLE001 — we want to catch anything from handlers
+        handler(job, ctx)
+    except Exception as e:  # noqa: BLE001
         log.exception("Job %s failed", job_id)
         dynamo.update_job_status(
             job_id,

@@ -1,28 +1,31 @@
-"""Stub handler for process_event jobs.
+"""Run the supervisor pipeline for a process_event job.
 
-Phase 5+ replaces the body with a call to the supervisor agent. For now we
-flip the event through processing → processed so we can verify the queue
-loop end-to-end.
+Reads the event from DynamoDB, flips it through processing → processed,
+and delegates the actual work to the supervisor (privacy + analyzer).
 """
 
 import logging
-import time
-
-from shared.dynamo import DynamoClient
 
 log = logging.getLogger(__name__)
 
 
-def handle(job: dict, dynamo: DynamoClient) -> None:
+def handle(job: dict, ctx: dict) -> None:
     payload = job["payload"]
     customer_id = payload["customer_id"]
     event_id = payload["event_id"]
     created_at = payload["created_at"]
 
+    dynamo = ctx["dynamo"]
+    supervisor = ctx["supervisor"]
+
+    event = dynamo.get_event(customer_id, created_at, event_id)
+    if not event:
+        raise ValueError(f"event {event_id} not found in DynamoDB")
+
     log.info("Processing event %s for customer %s", event_id, customer_id)
-
     dynamo.update_event_status(customer_id, created_at, event_id, "processing")
-    time.sleep(1)  # simulate work so the "processing" state is observable
-    dynamo.update_event_status(customer_id, created_at, event_id, "processed")
 
-    log.info("Event %s marked as processed", event_id)
+    result = supervisor.run_process_event(job["job_id"], event)
+
+    dynamo.update_event_status(customer_id, created_at, event_id, "processed")
+    log.info("Event %s done (status=%s)", event_id, result.get("status"))

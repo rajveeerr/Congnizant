@@ -1,16 +1,14 @@
 """Stub handler for generate_recommendation jobs.
 
-Filled in Phase 8 — for now it just logs so the dispatcher has a target
-when the server starts emitting these jobs.
+Phase 8 fills this in (calls recommender_tool + verifier_tool, caches
+the offer in Redis, writes the result somewhere the server can read).
 """
 
 import logging
 
-from shared.dynamo import DynamoClient
-
 log = logging.getLogger(__name__)
 
 
-def handle(job: dict, dynamo: DynamoClient) -> None:
+def handle(job: dict, ctx: dict) -> None:
     customer_id = job["payload"].get("customer_id", "unknown")
     log.info("Generating recommendation for customer %s (stub)", customer_id)
