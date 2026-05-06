@@ -57,6 +57,12 @@ TABLES = [
         "BillingMode": "PAY_PER_REQUEST",
     },
     {
+        "TableName": "customer_auth",
+        "KeySchema": PK_SK,
+        "AttributeDefinitions": PK_SK_ATTRS,
+        "BillingMode": "PAY_PER_REQUEST",
+    },
+    {
         "TableName": "jobs",
         "KeySchema": PK_SK,
         "AttributeDefinitions": PK_SK_ATTRS + STATUS_INDEX_ATTRS,

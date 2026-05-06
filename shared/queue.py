@@ -18,6 +18,13 @@ def push_job(client: _redis.Redis, payload: str) -> None:
     client.lpush(QUEUE_PENDING, payload)
 
 
+def push_jobs(client: _redis.Redis, payloads: list[str]) -> None:
+    """LPUSH many jobs in one round-trip. Pop order matches submission order."""
+    if not payloads:
+        return
+    client.lpush(QUEUE_PENDING, *payloads)
+
+
 def pop_job(client: _redis.Redis, timeout: int = 0) -> str | None:
     """BRPOP a job JSON payload (blocking). Returns None on timeout."""
     result = client.brpop(QUEUE_PENDING, timeout=timeout)

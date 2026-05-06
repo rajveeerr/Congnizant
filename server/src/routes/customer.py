@@ -1,6 +1,6 @@
 """Right-to-delete (GDPR Art. 17 / "right to erasure").
 
-DELETE /customer/{customer_id} wipes:
+DELETE /customer wipes (customer_id resolved from the JWT):
   - all events from DynamoDB customer_events
   - the customer's consent record
   - all vectors from OpenSearch (3 collections)
@@ -11,7 +11,7 @@ Returns counts of what was deleted.
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from shared.constants import (
     COLLECTION_BEHAVIOR,
@@ -23,6 +23,7 @@ from shared.queue import make_redis
 from shared.vector_store import make_vector_store
 
 from ..config import settings
+from ..middleware.auth import current_customer_id
 
 
 log = logging.getLogger(__name__)
@@ -62,8 +63,8 @@ def _delete_vectors_for_customer(customer_id: str) -> int:
     return len(collections)
 
 
-@router.delete("/customer/{customer_id}")
-def delete_customer(customer_id: str) -> dict:
+@router.delete("/customer")
+def delete_customer(customer_id: str = Depends(current_customer_id)) -> dict:
     log.info("DELETE customer %s", customer_id)
 
     events_deleted = _dynamo.delete_all_events_for_customer(customer_id)

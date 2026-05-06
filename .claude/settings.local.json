@@ -3,5 +3,10 @@
     "allow": [
       "Bash(aws *)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "aws-docs",
+    "aws-diagram",
+    "aws-core"
+  ]
 }

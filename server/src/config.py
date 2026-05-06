@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     opensearch_host: str = "opensearch"
     opensearch_port: int = 9200
 
+    jwt_secret: str = "dev-secret-change-me"
+    jwt_algorithm: str = "HS256"
+    jwt_expiry_hours: int = 24
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

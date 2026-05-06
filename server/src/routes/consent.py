@@ -1,11 +1,12 @@
 """Consent endpoints — POST to write/update, GET to read."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from shared.dynamo import DynamoClient
-from shared.schemas import ConsentRecord
+from shared.schemas import ConsentRecord, ConsentUpsertRequest
 
 from ..config import settings
+from ..middleware.auth import current_customer_id
 
 
 router = APIRouter()
@@ -21,7 +22,15 @@ def _clean(record: dict) -> dict:
 
 
 @router.post("/consent")
-def upsert_consent(consent: ConsentRecord) -> dict:
+def upsert_consent(
+    req: ConsentUpsertRequest,
+    customer_id: str = Depends(current_customer_id),
+) -> dict:
+    consent = ConsentRecord(
+        customer_id=customer_id,
+        scopes=req.scopes,
+        data_retention_days=req.data_retention_days,
+    )
     _dynamo.put_consent(consent.model_dump())
     return {
         "customer_id": consent.customer_id,
@@ -30,8 +39,8 @@ def upsert_consent(consent: ConsentRecord) -> dict:
     }
 
 
-@router.get("/consent/{customer_id}")
-def get_consent(customer_id: str) -> dict:
+@router.get("/consent")
+def get_consent(customer_id: str = Depends(current_customer_id)) -> dict:
     record = _dynamo.get_consent(customer_id)
     if not record:
         raise HTTPException(status_code=404, detail="consent record not found")

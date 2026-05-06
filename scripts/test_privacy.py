@@ -20,6 +20,7 @@ import os
 import time
 import urllib.request
 import urllib.error
+import uuid
 from urllib.parse import urlencode
 
 import boto3
@@ -75,11 +76,17 @@ def main() -> None:
     )
     redis_client = redis_module.from_url(REDIS_URL, decode_responses=True)
 
+    # Clean up any leftover state from a previous failed run.
+    _request("DELETE", f"/customer/{CUSTOMER}")
+    _request("DELETE", f"/customer/{NO_CONSENT}")
+    _request("DELETE", f"/customer/{NO_SCOPE}")
+
     _section("CONSENT GATE — INGESTION")
 
     # No consent at all → 403
     status, body = _request("POST", "/events", {
         "customer_id": NO_CONSENT,
+        "client_event_id": str(uuid.uuid4()),
         "event_type": "page_view",
         "payload": {"page": "/x"},
     })
@@ -90,6 +97,7 @@ def main() -> None:
     _request("POST", "/consent", {"customer_id": NO_SCOPE, "scopes": ["analytics"]})
     status, body = _request("POST", "/events", {
         "customer_id": NO_SCOPE,
+        "client_event_id": str(uuid.uuid4()),
         "event_type": "page_view",
         "payload": {"page": "/x"},
     })
@@ -111,6 +119,7 @@ def main() -> None:
     for i in range(3):
         status, body = _request("POST", "/events", {
             "customer_id": CUSTOMER,
+            "client_event_id": str(uuid.uuid4()),
             "event_type": "purchase",
             "payload": {"product": f"item_{i}"},
         })
@@ -118,9 +127,10 @@ def main() -> None:
         job_ids.append(body["job_id"])
     print(f"ingested 3 events → jobs {job_ids}")
 
-    # Wait for the worker to process them
-    print("waiting 4s for worker...")
-    time.sleep(4)
+    # Wait for the worker to process them. Sequential supervisor takes ~2s/event
+    # in mock mode, so we wait long enough for 3 events with headroom.
+    print("waiting 10s for worker...")
+    time.sleep(10)
 
     # Spot-check state
     events = dynamodb.Table("customer_events").query(
