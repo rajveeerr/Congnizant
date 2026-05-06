@@ -17,6 +17,9 @@ TABLE_CUSTOMER_PROFILE = "customer_profile"
 TABLE_CART_ITEMS = "cart_items"
 TABLE_WISHLIST_ITEMS = "wishlist_items"
 TABLE_ORDERS = "orders"
+# Recommender catalog (separate from the storefront `products` table —
+# used by the complement-products recommender for prompt-time lookups).
+TABLE_PRODUCT_CATALOG = "product_catalog"
 
 # OpenSearch collections
 COLLECTION_FACTS = "customer-facts"

@@ -142,6 +142,13 @@ TABLES = [
         "AttributeDefinitions": PK_SK_ATTRS,
         "BillingMode": "PAY_PER_REQUEST",
     },
+    # --- recommender catalog (separate from the storefront `products` table) -
+    {
+        "TableName": "product_catalog",
+        "KeySchema": PK_SK,
+        "AttributeDefinitions": PK_SK_ATTRS,
+        "BillingMode": "PAY_PER_REQUEST",
+    },
 ]
 
 

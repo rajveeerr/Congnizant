@@ -13,6 +13,7 @@ from .middleware.rate_limit import RateLimitMiddleware
 from .routes import auth as auth_route
 from .routes import catalog as catalog_route
 from .routes import checkout as checkout_route
+from .routes import complement as complement_route
 from .routes import consent as consent_route
 from .routes import customer as customer_route
 from .routes import events as events_route
@@ -76,6 +77,7 @@ async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
 
 
 app.include_router(auth_route.router)
+app.include_router(complement_route.router)
 app.include_router(consent_route.router)
 app.include_router(customer_route.router)
 app.include_router(events_route.router)

@@ -19,6 +19,7 @@ from .constants import (
     TABLE_CUSTOMER_PROFILE,
     TABLE_JOBS,
     TABLE_ORDERS,
+    TABLE_PRODUCT_CATALOG,
     TABLE_PRODUCT_REVIEWS,
     TABLE_PRODUCTS,
     TABLE_REVIEW_VOTES,
@@ -30,17 +31,20 @@ def _strip_empty_sets(item: dict) -> dict:
     return {k: v for k, v in item.items() if not (isinstance(v, set) and not v)}
 
 
-def _coerce_floats(value):
-    """DynamoDB rejects Python floats; convert recursively to Decimal.
-    Used by ecommerce writes whose payloads contain price/rating/etc."""
+def _decimalize(value):
+    """DynamoDB rejects Python floats; convert them (recursively) to Decimal.
+    Strings → Decimal via str() to avoid binary float drift (1.1 → 1.10000…)."""
     if isinstance(value, float):
-        # str() round-trips cleanly: Decimal(str(0.1)) == Decimal('0.1')
         return Decimal(str(value))
     if isinstance(value, dict):
-        return {k: _coerce_floats(v) for k, v in value.items()}
+        return {k: _decimalize(v) for k, v in value.items()}
     if isinstance(value, list):
-        return [_coerce_floats(v) for v in value]
+        return [_decimalize(v) for v in value]
     return value
+
+
+# Backwards-compat alias: ecommerce write methods reference this name.
+_coerce_floats = _decimalize
 
 
 class DynamoClient:
@@ -230,7 +234,7 @@ class DynamoClient:
         )
         return resp.get("Item")
 
-    # --- products ----------------------------------------------------------
+    # --- products (storefront) ---------------------------------------------
     # NOTE: products are also indexed in the OpenSearch product-catalog
     # collection. Mutations MUST go through the CatalogWriter service so
     # both stores stay in sync. Direct callers of put_product / delete
@@ -507,3 +511,64 @@ class DynamoClient:
             Key={"PK": f"CUSTOMER#{customer_id}", "SK": f"WISH#{product_id}"}
         )
         return True
+
+    # --- product_catalog (recommender) -------------------------------------
+    # Distinct from the storefront `products` table above. The complement
+    # recommender owns a hand-curated catalog (~40 SKUs with descriptions
+    # used in prompt context) and uses these *_recommender_product methods
+    # so the names don't collide with the storefront's put_product/scan_products.
+
+    def put_recommender_product(self, product: dict) -> None:
+        item = _decimalize(_strip_empty_sets({
+            "PK": f"PRODUCT#{product['product_id']}",
+            "SK": "META",
+            **product,
+        }))
+        self.table(TABLE_PRODUCT_CATALOG).put_item(Item=item)
+
+    def batch_put_recommender_products(self, products: list[dict]) -> None:
+        if not products:
+            return
+        with self.table(TABLE_PRODUCT_CATALOG).batch_writer() as bw:
+            for p in products:
+                item = _decimalize(_strip_empty_sets({
+                    "PK": f"PRODUCT#{p['product_id']}",
+                    "SK": "META",
+                    **p,
+                }))
+                bw.put_item(Item=item)
+
+    def get_recommender_product(self, product_id: str) -> dict | None:
+        resp = self.table(TABLE_PRODUCT_CATALOG).get_item(
+            Key={"PK": f"PRODUCT#{product_id}", "SK": "META"}
+        )
+        item = resp.get("Item")
+        if item:
+            item.pop("PK", None)
+            item.pop("SK", None)
+        return item
+
+    def batch_get_recommender_products(self, product_ids: list[str]) -> list[dict]:
+        """Fetches multiple products at once. DDB BatchGetItem caps at 100 keys
+        per request — for the hackathon catalog (~40 products) one call suffices."""
+        if not product_ids:
+            return []
+        keys = [{"PK": f"PRODUCT#{pid}", "SK": "META"} for pid in product_ids]
+        resp = self.resource.batch_get_item(
+            RequestItems={TABLE_PRODUCT_CATALOG: {"Keys": keys}}
+        )
+        items = resp.get("Responses", {}).get(TABLE_PRODUCT_CATALOG, [])
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+        return items
+
+    def scan_recommender_products(self) -> list[dict]:
+        """Scan the whole catalog. Fine for hackathon-scale (~40 items); for
+        production swap to query-by-category via a GSI."""
+        resp = self.table(TABLE_PRODUCT_CATALOG).scan()
+        items = resp.get("Items", [])
+        for item in items:
+            item.pop("PK", None)
+            item.pop("SK", None)
+        return items
