@@ -14,12 +14,13 @@ Idempotency:
     vector doc_ids in the analyzer keep OpenSearch idempotent too.
 """
 
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
-from shared.dynamo import DynamoClient
-from shared.queue import make_redis, push_jobs
+from shared.constants import QUEUE_PENDING
+from shared.queue import push_jobs
 from shared.schemas import (
     CustomerEvent,
     IngestBatchRequest,
@@ -30,14 +31,42 @@ from shared.schemas import (
 )
 
 from ..config import settings
+from ..deps import dynamo as _dynamo
+from ..deps import redis_client as _redis
 
 
 router = APIRouter()
-_dynamo = DynamoClient(endpoint=settings.dynamodb_endpoint, region=settings.aws_region)
-_redis = make_redis(settings.redis_url)
+
+
+def _rate_limited_for_customer(customer_id: str) -> bool:
+    """Increment the customer's per-minute counter. Returns True if over limit
+    (in which case the increment is rolled back so we don't count rejections).
+    Fixed window — sliding would be more accurate but isn't needed at this scale.
+    """
+    bucket = f"rate:cust:{customer_id}:{int(time.time() // 60)}"
+    count = _redis.incr(bucket)
+    if count == 1:
+        _redis.expire(bucket, 65)
+    if count > settings.max_events_per_customer_per_min:
+        _redis.decr(bucket)
+        return True
+    return False
 
 
 def _ingest_events(reqs: list[IngestEventRequest]) -> IngestBatchResponse:
+    # Backpressure: refuse new work when the worker queue is too deep.
+    # Whole-request rejection (429) — not partial — because the system can't
+    # accept anything new until it drains.
+    queue_depth = _redis.llen(QUEUE_PENDING)
+    if queue_depth > settings.max_queue_depth:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"queue overloaded ({queue_depth} pending, "
+                f"limit {settings.max_queue_depth}) — try again shortly"
+            ),
+        )
+
     # Dedup within the batch — first occurrence wins.
     by_id: dict[str, IngestEventRequest] = {}
     for r in reqs:
@@ -71,6 +100,16 @@ def _ingest_events(reqs: list[IngestEventRequest]) -> IngestBatchResponse:
                 client_event_id=r.client_event_id,
                 status="rejected",
                 reason="missing_personalization_scope",
+            )
+            continue
+
+        # Per-customer rate limit. Counted only against accepted-after-consent
+        # events so denied/ungated customers don't burn another's budget.
+        if _rate_limited_for_customer(r.customer_id):
+            result_by_id[r.client_event_id] = IngestEventResult(
+                client_event_id=r.client_event_id,
+                status="rejected",
+                reason="customer_rate_limit",
             )
             continue
 
@@ -126,7 +165,9 @@ def ingest_event(req: IngestEventRequest) -> dict:
     response = _ingest_events([req])
     result = response.results[0]
     if result.status == "rejected":
-        raise HTTPException(status_code=403, detail=result.reason)
+        # 429 for rate limit, 403 for everything else (consent failures)
+        code = 429 if result.reason == "customer_rate_limit" else 403
+        raise HTTPException(status_code=code, detail=result.reason)
     return {
         "event_id": result.event_id,
         "job_id": result.job_id,

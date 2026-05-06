@@ -6,19 +6,30 @@ from fastapi.responses import JSONResponse
 from shared.logging_config import configure_json_logging
 
 from .config import settings
+from .deps import redis_client
 from .middleware.auth import APIKeyMiddleware
+from .middleware.rate_limit import RateLimitMiddleware
 from .routes import consent as consent_route
 from .routes import customer as customer_route
 from .routes import events as events_route
 from .routes import jobs as jobs_route
+from .routes import metrics as metrics_route
 from .routes import recommend as recommend_route
 from .routes import traces as traces_route
 
 configure_json_logging()
 log = logging.getLogger("server")
 
-app = FastAPI(title="HyperPersona Server", version="0.13.0")
+app = FastAPI(title="HyperPersona Server", version="0.14.0")
 
+# Middleware order: last added runs FIRST. Auth must run before rate limit
+# so anonymous/invalid-key requests get 401 and don't pollute rate buckets.
+app.add_middleware(
+    RateLimitMiddleware,
+    redis_client=redis_client,
+    limit=settings.max_requests_per_key_per_min,
+    window_s=60,
+)
 app.add_middleware(APIKeyMiddleware, api_key=settings.api_key)
 
 
@@ -35,6 +46,7 @@ app.include_router(consent_route.router)
 app.include_router(customer_route.router)
 app.include_router(events_route.router)
 app.include_router(jobs_route.router)
+app.include_router(metrics_route.router)
 app.include_router(recommend_route.router)
 app.include_router(traces_route.router)
 
