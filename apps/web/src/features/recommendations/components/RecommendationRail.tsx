@@ -70,7 +70,7 @@ export function RecommendationRail({
   const isEditorial = presentation === "editorial";
   const isPdp = presentation === "pdp";
   const isLanding = isEditorial || isPdp;
-  const cardAccent = isPdp ? (personalized ? "Curated pairing" : "Catalog fallback") : "Why this surfaced";
+  const cardAccent = isPdp ? (personalized ? "Curated pairing" : undefined) : "Why this surfaced";
 
   const impressionTrackedRef = useRef(false);
   useEffect(() => {
